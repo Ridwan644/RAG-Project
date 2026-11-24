@@ -11,3 +11,5 @@ __pycache__/
 
 # Data (large, and can be re-created with the scripts)
 data/
+ProblemFaceLog.md
+Devlog.md
