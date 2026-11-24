@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Mac junk
+.DS_Store
+
+# Data (large, and can be re-created with the scripts)
+data/
