@@ -3,7 +3,9 @@
 ## Who I am and how to work with me
 - I'm Ridwan, a CS student (UT Dallas) building this project to **learn RAG deeply** and to show it to recruiters for AI backend roles.
 - **Act as a senior AI engineer teaching a student.** Explain the concept first (plain language, an analogy), then show code, then explain what each part does.
-- **Do NOT create, edit, overwrite or delete any file unless I explicitly say so.** Show me the code and the commands; I run them. Ask before any change.
+- **Do NOT create, edit, overwrite or delete any file unless I explicitly say so.** Ask before any change.
+- **Code:** you may write code files when I ask, but build them **incrementally** (one small function/step at a time, explain it, I check it, then the next step), never a whole file in one shot. Every script starts with a header docstring explaining what it does, how it works, and how to run it. I review everything.
+- **Commands:** I run them myself unless I explicitly ask you to. **Never run `git commit` / `git push`** — give me the commands.
 - Keep explanations short and plain. I push back when answers are too long or jargon-heavy.
 - When I need to create files/folders or run something, give me the exact terminal commands (I'm practicing the terminal).
 - For plumbing (e.g. parsing), focus on the principles and decisions. Go deep, line by line, on the RAG parts: chunking, embeddings, search, reranking, citations, evaluation.
@@ -25,11 +27,11 @@ The differentiator vs. typical student RAG projects: **measured results** (e.g. 
 | Language | Python (venv at `.venv`) |
 | Downloading | requests + SEC EDGAR APIs (done) |
 | HTML parsing | BeautifulSoup + lxml |
-| PDF parsing | **Docling** (IBM, open source, layout + TableFormer table models) — currently being tested to replace a hand-built PyMuPDF parser |
+| PDF parsing | **Docling** (IBM, open source, layout + TableFormer table models) — chosen; replaced the hand-built PyMuPDF parser |
 | Database | **PostgreSQL + pgvector** in Docker (chosen over OpenSearch: I already know Postgres; pgvector is the common default for <10M vectors) |
 | Keyword search | Postgres full-text search, plus `rank_bm25` (true BM25) as a comparison experiment |
 | Vector search | pgvector |
-| Embeddings | sentence-transformers (open-source BGE model) |
+| Embeddings | sentence-transformers, **`BAAI/bge-base-en-v1.5`** (512-token limit) as baseline; maybe compare a challenger later (e.g. voyage-finance-2 or Qwen3-Embedding) on the eval set |
 | Reranker | Cross-encoder (BGE reranker) |
 | Query rewriting | a small, fast Claude model |
 | Answers | Claude via the Anthropic API |
@@ -40,10 +42,18 @@ The differentiator vs. typical student RAG projects: **measured results** (e.g. 
 ## Roadmap (current status)
 1. ✅ Get the documents
 2. ✅ Learn to read an income statement (revenue, operating income, net income; traps: two "net income" lines, three- vs nine-month columns, GAAP vs adjusted)
-3. 🔄 **Parsing** ← WE ARE HERE
-   - 3a HTML: ✅ done (`src/parse_html.py` → `data/parsed/*.json` + `data/parsed/preview/*.md`)
-   - 3b PDF: a hand-built PyMuPDF parser exists (`src/parse_pdf.py`) but was too complex to learn from and fails on borderless tables. **Now testing Docling** with `src/test_docling.py` (output goes to `data/docling_test/`).
-4. ⬜ Chunking — fixed-size, overlapping, and by section; every chunk carries labels (doc type, period, section/page, source URL)
+3. ✅ Parsing — all 35 documents in ONE shared JSON shape in `data/parsed/`
+   - 3a HTML: `src/parse_html.py`
+   - 3b PDF: `src/parse_pdf_docling.py` (Docling). Verified: Joyner's 2024 pay row has all values in the right columns and sums to the Total (17,808,792). Old PyMuPDF outputs kept in `data/parsed_old_pymupdf/`.
+4. 🔄 **Chunking** ← WE ARE HERE. Every chunk carries labels (doc type, period, section/heading, pages, source URL) + a unique `chunk_id`.
+   - 4a Fixed-size baseline: ✅ `src/chunk_fixed.py` → `data/chunks/fixed.jsonl` (250 words, 50 overlap, 3,928 chunks)
+   - 4b Structure-aware: 🔄 `src/chunk_structure.py`, built step by step:
+     - Step 1 ✅ `group_blocks`: one pile per slide (decks) / per heading (everything else)
+     - Step 2 ⬜ pile → text (tables keep row breaks)
+     - Step 3 ⬜ split big piles between paragraphs (long paragraph → sentences; tables by rows with header repeated); merge tiny piles (heading only, e.g. "PART I") into the next pile
+     - Step 4 ⬜ label + save to `data/chunks/structure.jsonl`
+   - 4c ⬜ Context headers (e.g. "CVS Q3 2025 10-Q, Revenue:" prepended to each chunk)
+   - 4d ⬜ Sanity-check vs. fixed, commit
 5. ⬜ Write ~40 test questions with known answers BEFORE building search. Types: exact lookup, calculation, right period, segment, GAAP vs adjusted, text, multi-hop, unanswerable
 6. ⬜ Set up Postgres + pgvector, load chunks + embeddings
 7. ⬜ Keyword + vector search, measured separately (Recall@5, MRR)
@@ -60,13 +70,19 @@ data/
   answer_key/CVS_facts.json SEC XBRL "company facts" — answer key for eval only, NEVER searched
   manifest.json             every downloaded SEC file: form, period, filed date, source URL, path
   excluded/                 3 files set aside (see Data notes)
-  parsed/                   parsed JSON per document + preview/*.md
-  docling_test/             Docling test output
+  parsed/                   parsed JSON per document (HTML + PDF, same shape) + preview/*.md
+  parsed_old_pymupdf/       old hand-built PDF parser output (kept for comparison)
+  chunks/                   fixed.jsonl (baseline), structure.jsonl (coming)
+  docling_test/             Docling test output (Markdown)
 src/
-  download_filings.py       SEC EDGAR downloader (CVS only; needs USER_AGENT with my name + email)
+  download_filings.py       SEC EDGAR downloader (CVS only; reads SEC_USER_AGENT from .env)
   parse_html.py             HTML parser (stations: load_clean_soup, walk_blocks, clean_table, drop_noise, save)
-  parse_pdf.py              hand-built PDF parser (likely to be replaced by Docling)
-  test_docling.py           Docling test: python src/test_docling.py <pdf path>
+  parse_pdf_docling.py      PDF parser (Docling) → same JSON shape as parse_html.py
+  parse_pdf.py              old hand-built PyMuPDF parser (replaced; kept for learning)
+  test_docling.py           Docling test → Markdown
+  explore_docling.py        prints each Docling item: page, label, text
+  chunk_fixed.py            baseline chunker (fixed size + overlap)
+  chunk_structure.py        structure-aware chunker (in progress)
 ```
 
 ## The documents
@@ -84,8 +100,10 @@ CVS has 3 segments: **Health Care Benefits** (= Aetna, insurance), **Health Serv
 - Excluded: `CVS_earnings_2024-01-05.htm` (leadership announcement, not earnings), `CVS_earnings_2024-10-18.htm` (CEO change + PRELIMINARY Q3 2024 numbers that conflict with the final ones — maybe re-add later as a "preliminary vs final" test), `CVS_impact_appendix_2024.pdf` (was a 404 error page, not a PDF).
 - FY2025 (in millions): total revenues 402,067; operating income 4,660; net income 1,728; **net income attributable to CVS Health 1,768** (the XBRL answer key uses `NetIncomeLoss` = the 1,768 figure).
 - Q3 2025 had a 5,725M goodwill impairment → GAAP operating loss (3,207) vs adjusted operating income +3,459.
-- PDF table problem: in the proxy's Summary Compensation Table (borderless), the hand-built parser lost column positions (e.g. J. David Joyner's 2024 row has 6 values for 8 columns). **The Docling test is checking whether this is fixed.**
+- PDF table problem (FIXED by Docling): the hand-built parser lost column positions in the proxy's borderless Summary Compensation Table. Remaining quirk: names wrap across rows (Joyner's 2024 row starts with "Executive Officer") → keep whole tables together when chunking.
+- Chunking findings: biggest pile = 10-K "Laws and Regulations" section, 10,274 words (1 heading + 98 paragraphs, no tables; longest paragraph 310 words). Tiny piles of 1–2 words = headings with nothing under them. Some HTML blocks have `section: None` (not fixed yet).
+- Secrets: `SEC_USER_AGENT` lives in `.env` (git-ignored); `.env.example` is committed. `data/` and `ProblemFaceLog.md` are git-ignored.
+- I keep `Devlog.md` (per session: what I did, learned, what's next) and `ProblemFaceLog.md` (problems: how found, why, fix, lesson).
 
 ## Next action
-Finish the Docling test: run `python src/test_docling.py data/raw/CVS_pdf/reports/CVS_proxy_2026.pdf`, then
-`grep -n -A 12 "J. David Joyner" data/docling_test/CVS_proxy_2026.md | head -40` and check whether the pay table keeps its columns. Then decide: Docling vs. the hand-built parser for PDFs, and move on to step 4 (chunking).
+Step 2 of `src/chunk_structure.py`: turn each pile into text (tables keep their row breaks). Then step 3 (split big / merge tiny piles), step 4 (label + save), context headers.
